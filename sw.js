@@ -1,55 +1,43 @@
-const CACHE_NAME = 'gradeview-cache-v1';
-const ASSETS = [
-  './',
-  'index.html',
-  'manifest.json'
-];
+const CACHE = 'gradeview-v4';
+const PRECACHE = ['./', './index.html', './manifest.json'];
 
-self.addEventListener('install', (e) => {
+self.addEventListener('install', e => {
+  self.skipWaiting();
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS).catch(err => console.log('Asset cache error:', err));
-    })
+    caches.open(CACHE).then(c => c.addAll(PRECACHE).catch(() => {}))
   );
 });
 
-self.addEventListener('activate', (e) => {
+self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    })
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', (e) => {
-  // Only handle GET requests and avoid Supabase API calls caching directly here
-  if (e.request.method !== 'GET' || e.request.url.includes('/rest/v1/') || e.request.url.includes('/auth/v1/')) {
-    return;
-  }
+self.addEventListener('fetch', e => {
+  // Never intercept Supabase or non-GET
+  if (
+    e.request.method !== 'GET' ||
+    e.request.url.includes('supabase.co') ||
+    e.request.url.includes('/rest/v1/') ||
+    e.request.url.includes('/auth/v1/') ||
+    e.request.url.includes('googleapis.com') ||
+    e.request.url.includes('jsdelivr.net') ||
+    e.request.url.includes('cdn.')
+  ) return;
 
+  // Network-first for app shell, cache fallback
   e.respondWith(
-    caches.match(e.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(e.request).then((response) => {
-        // Cache newly requested resources if valid
-        if (response && response.status === 200 && response.type === 'basic') {
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(e.request, responseToCache);
-          });
+    fetch(e.request)
+      .then(res => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
         }
-        return response;
-      }).catch(() => {
-        // Offline fallback if needed
-      });
-    })
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
