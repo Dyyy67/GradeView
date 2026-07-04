@@ -1024,11 +1024,16 @@ function parseGradeDocHtml(htmlStr){
   const doc = new DOMParser().parseFromString(htmlStr,'text/html');
   const tables = doc.querySelectorAll('table');
   const results = [];
+  const seenNames = new Set();
   let current = null;
 
   function flushCurrent(){
     if(current && current.name && current.name.length>1 && Object.keys(current.grades_all).length>0){
-      results.push({...current, access_code:genCode(), created_at:new Date().toISOString()});
+      const key = current.name.trim().toLowerCase();
+      if(!seenNames.has(key)){
+        seenNames.add(key);
+        results.push({...current, access_code:genCode(), created_at:new Date().toISOString()});
+      }
     }
     current = null;
   }
