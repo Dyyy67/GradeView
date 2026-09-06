@@ -927,7 +927,7 @@ function renderParentGrades(stu, q){
     wrap.innerHTML = '<div class="empty"><div class="empty-title">No grades available</div><p class="empty-sub">Ask your teacher to upload grade sheets</p></div>';
     return;
   }
-  const vals = subjects.map(s => ga[s]?.[q]).filter(v => v!=null);
+  const vals = subjects.filter(isAverageSubject).map(s => ga[s]?.[q]).filter(v => v!=null);
   const avg  = vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : null;
   let html = '';
 
@@ -1593,7 +1593,8 @@ function renderTable(s){
   s.forEach((x,i)=>{
     const ga=x.grades_all||{};
     const qg=subjs.map(sub=>ga[sub]?.[q]??null);
-    const valid=qg.filter(v=>v!=null);
+    const avgSubjs = Object.keys(ga).filter(isAverageSubject);
+    const valid = avgSubjs.map(sub=>ga[sub]?.[q]).filter(v=>v!=null);
     const avg=valid.length?Math.round(valid.reduce((a,b)=>a+b,0)/valid.length):null;
     html+=`<tr style="cursor:pointer" onclick="openModal(${i})">
       <td><strong>${x.name}</strong></td>
@@ -1644,7 +1645,7 @@ function openModal(i){
     html+=`<tr style="border-top:1px solid var(--border)">
       <td style="padding:8px 0;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Average</td>
       ${['Q1','Q2','Q3','Q4'].map(qk=>{
-        const vals=subjs.map(s=>ga[s]?.[qk]).filter(v=>v!=null);
+        const vals=subjs.filter(isAverageSubject).map(s=>ga[s]?.[qk]).filter(v=>v!=null);
         const avg=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):null;
         return`<td style="text-align:center;padding:8px 4px">${avg!=null?`<span class="gpill ${gc(avg)}" style="font-weight:800">${avg}</span>`:'—'}</td>`;
       }).join('')}
@@ -1821,6 +1822,13 @@ function printCodes(){
 /* ════════════════════════════════════════════
    GRADE HELPERS
 ════════════════════════════════════════════ */
+const AVG_SUBJECT_KEYS = ['bible','filipino','math','english','araling panlipunan','arpan','science','epp','mapeh','gmrc','pathfinder','pathfinding'];
+function isAverageSubject(name){
+  const s = (name||'').toLowerCase().trim();
+  if(!s) return false;
+  return AVG_SUBJECT_KEYS.some(k => s===k || s.startsWith(k) || k.startsWith(s));
+}
+
 function gc(g){
   if(g==null) return '';
   const n=parseInt(g,10);
