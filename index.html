@@ -246,7 +246,15 @@ tr:hover td{background:rgba(99,102,241,.04)}
 .qsel{background:var(--card);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-family:var(--body);font-size:14px;padding:9px 14px;outline:none}
 
 /* ─── PARENT VIEW ─── */
-.parent-wrap{max-width:560px}
+.parent-wrap{max-width:560px;position:relative}
+.parent-wrap,#modal-stu-body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.wmark{position:absolute;inset:-20px;pointer-events:none;overflow:hidden;z-index:0;opacity:.05}
+.wmark span{position:absolute;white-space:nowrap;font-size:12px;font-weight:700;color:var(--text);transform:rotate(-26deg)}
+#privacy-shield{position:fixed;inset:0;z-index:999;background:rgba(7,8,13,.94);backdrop-filter:blur(35px);-webkit-backdrop-filter:blur(35px);display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;cursor:pointer;text-align:center;padding:2rem}
+#privacy-shield.show{display:flex}
+#privacy-shield .ps-ic{width:56px;height:56px;border-radius:16px;background:rgba(99,102,241,.15);display:flex;align-items:center;justify-content:center}
+#privacy-shield .ps-title{font-family:var(--display);font-size:17px;font-weight:700}
+#privacy-shield .ps-sub{font-size:13px;color:var(--text2);max-width:280px}
 .pavatar{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:22px;font-weight:800;color:#fff;flex-shrink:0}
 .qsw{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1.5rem}
 .qbtn{background:var(--card);border:1px solid var(--border);border-radius:var(--r);color:var(--text2);font-family:var(--body);font-size:13px;font-weight:600;padding:8px 18px;cursor:pointer;transition:all .18s}
@@ -608,6 +616,7 @@ create policy "Public read by access_code"
 <div class="page" id="page-parent">
   <div class="dash">
     <div class="parent-wrap">
+      <div class="wmark" id="p-watermark"></div>
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:1.5rem">
         <div class="pavatar" id="p-avatar">JS</div>
         <div>
@@ -651,6 +660,13 @@ create policy "Public read by access_code"
       <button class="btn btn-primary btn-sm" id="btn-add-student" onclick="submitAddStudent()">Add Student</button>
     </div>
   </div>
+</div>
+
+<!-- ══════════════ PRIVACY SHIELD (screenshot deterrent) ══════════════ -->
+<div id="privacy-shield" onclick="hidePrivacyShield()">
+  <div class="ps-ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--indigo2)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+  <div class="ps-title">Content hidden for privacy</div>
+  <div class="ps-sub">Tap anywhere to continue viewing grades</div>
 </div>
 
 <script>
@@ -909,6 +925,7 @@ function enterParent(student){
     (student.section ? 'Section: ' + student.section + ' · ' : '') +
     (student.teacher ? 'Adviser: ' + student.teacher + ' · ' : '') +
     'SY 2025-2026';
+  renderWatermark(`${student.name} · ${student.access_code}`);
   renderParentGrades(student, 'Q1');
   nav('page-parent');
 }
@@ -972,6 +989,39 @@ function renderParentGrades(stu, q){
     </div>`;
   wrap.innerHTML = html;
 }
+
+/* ════════════════════════════════════════════
+   PRIVACY: WATERMARK + SCREENSHOT-DETERRENT SHIELD
+   (Browsers have no API to detect/block real screenshots.
+   This blurs sensitive content when the tab/app loses focus
+   — e.g. the phone's app-switcher preview — and stamps a
+   faint traceable watermark so a leaked capture is identifiable.)
+════════════════════════════════════════════ */
+function renderWatermark(text){
+  const wrap = document.getElementById('p-watermark');
+  if(!wrap) return;
+  const stamp = `${text} · ${new Date().toLocaleDateString()}`;
+  let html='';
+  for(let r=0;r<10;r++){
+    html += `<div style="position:absolute;top:${r*80}px;left:${(r%2)*90-60}px">`;
+    for(let c=0;c<3;c++) html += `<span style="margin-right:70px">${stamp}</span>`;
+    html += `</div>`;
+  }
+  wrap.innerHTML = html;
+}
+
+function shieldShouldGuard(){
+  return document.getElementById('page-parent')?.classList.contains('active')
+      || document.getElementById('modal-stu')?.classList.contains('open');
+}
+function showPrivacyShield(){
+  if(shieldShouldGuard()) document.getElementById('privacy-shield')?.classList.add('show');
+}
+function hidePrivacyShield(){
+  document.getElementById('privacy-shield')?.classList.remove('show');
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) showPrivacyShield(); });
+window.addEventListener('blur', showPrivacyShield);
 
 /* ════════════════════════════════════════════
    FILE UPLOAD
