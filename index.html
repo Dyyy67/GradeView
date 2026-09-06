@@ -872,7 +872,8 @@ function enterTeacher(){
 async function loadData(){
   let s = [];
   if(sbReady){
-    const { data } = await _sb.from('students').select('*').order('name');
+    const { data, error } = await _sb.from('students').select('*').order('name');
+    if(error){ toast('Could not load students: '+error.message,'err'); console.error(error); }
     s = data || [];
     localStudents = s;
     saveLocal();
@@ -1342,13 +1343,31 @@ function parseGradeXlsx(wb){
     });
     subjectCols.sort((a,b)=>a.col-b.col);
 
-    // Walk every row looking for a learner name in any column
+    // Determine the actual "names" column from the data itself: the first
+    // row after the header that contains a comma-formatted learner name.
+    // Once found, later rows are matched strictly against that column so
+    // stray comma-text elsewhere (signatures, notes) isn't mistaken for a student.
+    let nameCol = -1;
+    const searchStart = hdrRow>=0 ? hdrRow+1 : 0;
+    for(let r=searchStart; r<rows.length && nameCol<0; r++){
+      const row = rows[r]||[];
+      for(let ci=0; ci<row.length; ci++){
+        if(looksLikeLearnerName(row[ci])){ nameCol=ci; break; }
+      }
+    }
+
+    // Walk every row looking for a learner name
     const seenNames = new Set();
     for(let r=0;r<rows.length;r++){
       const row = rows[r]||[];
       let name=null;
-      for(let ci=0; ci<row.length; ci++){
-        if(looksLikeLearnerName(row[ci])){ name=row[ci].trim(); break; }
+      if(nameCol>=0){
+        if(looksLikeLearnerName(row[nameCol])) name = row[nameCol].trim();
+      } else {
+        // Unknown layout — fall back to scanning the whole row
+        for(let ci=0; ci<row.length; ci++){
+          if(looksLikeLearnerName(row[ci])){ name=row[ci].trim(); break; }
+        }
       }
       if(!name) continue;
       const key=name.toLowerCase();
@@ -1474,9 +1493,12 @@ async function saveAll(){
 async function doSave(list){
   const btn = document.getElementById('btn-save-all');
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  let failCount = 0;
+  const failNames = [];
   if(sbReady){
     for(const s of list){
-      await _sb.from('students').upsert({ name:s.name, section:s.section, teacher:s.teacher, grades_all:s.grades_all, access_code:s.access_code, teacher_id:currentTeacher?.id },{ onConflict:'access_code' });
+      const { error } = await _sb.from('students').upsert({ name:s.name, section:s.section, teacher:s.teacher, grades_all:s.grades_all, access_code:s.access_code, teacher_id:currentTeacher?.id },{ onConflict:'access_code' });
+      if(error){ failCount++; failNames.push(s.name); console.error('Save failed for', s.name, error); }
     }
   } else {
     list.forEach(s=>{
@@ -1487,7 +1509,11 @@ async function doSave(list){
     saveLocal();
   }
   btn.disabled=false; btn.textContent='Add All';
-  toast(`Saved ${list.length} student${list.length!==1?'s':''}!`,'ok');
+  if(failCount>0){
+    toast(`Saved ${list.length-failCount} of ${list.length}. Failed: ${failNames.slice(0,3).join(', ')}${failNames.length>3?'…':''} — see console`,'err');
+  } else {
+    toast(`Saved ${list.length} student${list.length!==1?'s':''}!`,'ok');
+  }
   document.getElementById('parse-preview').style.display='none';
   parsedList=[]; selected.clear();
   document.getElementById('file-input').value='';
@@ -1503,23 +1529,35 @@ async function replaceAll(){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> Replacing…';
   // Delete all existing students
   if(sbReady){
-    await _sb.from('students').delete().eq('teacher_id', currentTeacher?.id);
+    const { error: delErr } = await _sb.from('students').delete().eq('teacher_id', currentTeacher?.id);
+    if(delErr){
+      btn.disabled=false; btn.textContent='Replace All';
+      toast('Could not delete existing students: '+delErr.message,'err');
+      console.error(delErr);
+      return;
+    }
   } else {
     localStudents=[];
     saveLocal();
   }
   // Now insert the new list fresh (always use new codes)
   const freshList = parsedList.map(s=>({...s, access_code: genCode()}));
+  let failCount = 0;
   if(sbReady){
     for(const s of freshList){
-      await _sb.from('students').insert({ name:s.name, section:s.section, teacher:s.teacher, grades_all:s.grades_all, access_code:s.access_code, teacher_id:currentTeacher?.id });
+      const { error } = await _sb.from('students').insert({ name:s.name, section:s.section, teacher:s.teacher, grades_all:s.grades_all, access_code:s.access_code, teacher_id:currentTeacher?.id });
+      if(error){ failCount++; console.error('Insert failed for', s.name, error); }
     }
   } else {
     freshList.forEach(s=>localStudents.push(s));
     saveLocal();
   }
   btn.disabled=false; btn.textContent='Replace All';
-  toast(`Replaced all data with ${freshList.length} student${freshList.length!==1?'s':''}!`,'ok');
+  if(failCount>0){
+    toast(`Replaced, but ${failCount} of ${freshList.length} students failed to save — see console`,'err');
+  } else {
+    toast(`Replaced all data with ${freshList.length} student${freshList.length!==1?'s':''}!`,'ok');
+  }
   document.getElementById('parse-preview').style.display='none';
   parsedList=[]; selected.clear();
   document.getElementById('file-input').value='';
@@ -1631,7 +1669,10 @@ async function delAt(i){
   toast(`Deleted ${s.name}`,'info');
 }
 async function _doDelete(code){
-  if(sbReady) await _sb.from('students').delete().eq('access_code',code);
+  if(sbReady){
+    const { error } = await _sb.from('students').delete().eq('access_code',code);
+    if(error){ toast('Could not delete: '+error.message,'err'); console.error(error); return; }
+  }
   localStudents=localStudents.filter(s=>s.access_code!==code);
   saveLocal(); loadData();
 }
@@ -1661,10 +1702,11 @@ async function submitAddStudent(){
   const newStu = { name, section, teacher, grades_all:{}, access_code:genCode(), created_at:new Date().toISOString() };
   try{
     if(sbReady){
-      await _sb.from('students').upsert(
+      const { error } = await _sb.from('students').upsert(
         { name:newStu.name, section:newStu.section, teacher:newStu.teacher, grades_all:newStu.grades_all, access_code:newStu.access_code, teacher_id:currentTeacher?.id },
         { onConflict:'access_code' }
       );
+      if(error) throw error;
     } else {
       localStudents.push(newStu);
       saveLocal();
@@ -1690,7 +1732,8 @@ async function deleteAllStudents(){
   if(!confirm('Are you absolutely sure? This will permanently erase every student record.')) return;
   try{
     if(sbReady){
-      await _sb.from('students').delete().eq('teacher_id', currentTeacher?.id);
+      const { error } = await _sb.from('students').delete().eq('teacher_id', currentTeacher?.id);
+      if(error) throw error;
     } else {
       localStudents = [];
       saveLocal();
@@ -1699,6 +1742,7 @@ async function deleteAllStudents(){
     loadData();
   }catch(e){
     toast('Could not delete students: '+e.message,'err');
+    console.error(e);
   }
 }
 
