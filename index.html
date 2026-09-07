@@ -578,9 +578,23 @@ create policy "Teachers manage own students"
   with check ( auth.uid() = teacher_id );
 
 -- Parents can look up by access_code (anon read)
-create policy "Public read by access_code"
-  on public.students for select
-  using ( true );
+-- SECURITY FIX: a blanket "using (true)" SELECT policy let ANY
+-- account (including other teachers) read the entire table, since
+-- RLS scopes visible ROWS, not the WHERE clause a query happens to
+-- use. Replaced with a function that only ever returns the ONE row
+-- matching an exact code — parents never get raw table access.
+drop policy if exists "Public read by access_code" on public.students;
+
+create or replace function public.get_student_by_code(p_code text)
+returns setof public.students
+language sql
+security definer
+set search_path = public
+as $$
+  select * from public.students where access_code = upper(trim(p_code)) limit 1;
+$$;
+
+grant execute on function public.get_student_by_code(text) to anon, authenticated;
         </pre>
       </div>
     </div>
@@ -853,8 +867,9 @@ async function parentLogin(){
 
   let student = null;
   if(sbReady){
-    const { data } = await _sb.from('students').select('*').eq('access_code', code).single();
-    student = data || null;
+    const { data, error } = await _sb.rpc('get_student_by_code', { p_code: code });
+    if(error) console.error(error);
+    student = (data && data[0]) || null;
   } else {
     student = localStudents.find(s => s.access_code === code) || null;
   }
@@ -875,8 +890,9 @@ function getUrlCode(){
 async function autoParentLogin(code){
   let student = null;
   if(sbReady){
-    const { data } = await _sb.from('students').select('*').eq('access_code', code).single();
-    student = data || null;
+    const { data, error } = await _sb.rpc('get_student_by_code', { p_code: code });
+    if(error) console.error(error);
+    student = (data && data[0]) || null;
   } else {
     student = localStudents.find(s => s.access_code === code) || null;
   }
@@ -911,7 +927,7 @@ function enterTeacher(){
 async function loadData(){
   let s = [];
   if(sbReady){
-    const { data, error } = await _sb.from('students').select('*').order('name');
+    const { data, error } = await _sb.from('students').select('*').eq('teacher_id', currentTeacher?.id).order('name');
     if(error){ toast('Could not load students: '+error.message,'err'); console.error(error); }
     s = data || [];
     localStudents = s;
